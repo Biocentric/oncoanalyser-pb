@@ -1,0 +1,7 @@
+reports:
+  samplesheet.csv:
+    display: "Auto-created samplesheet with collated metadata and FASTQ paths"
+  "**/linx/*linx.html":
+    display: "LINX report"
+  "**/orange/*.orange.pdf":
+    display: "ORANGE report"

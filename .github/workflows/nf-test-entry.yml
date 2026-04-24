@@ -1,0 +1,76 @@
+name: Run nf-test
+on:
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/meta.yml"
+      - "**/*.md"
+      - "**/*.png"
+      - "**/*.svg"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Cancel if a newer run is started
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # NOTE(SW): only run large tests on up-sized instances to avoid wasting compute (in this case the just test profile)
+  # NOTE(SW): the test profile requires more than 32 GB memory and with the available RunsOn instances, the 32cpu-linux-x64 runner is the best fit despite being excessively overprovisioned re vCPUs
+  # https://runs-on.com/runners/linux/
+  # Instance type     vCPUs   Memory (GiB)  RunsOn name
+  # m7a.medium            1              4  1cpu-linux-x64
+  # m7i.large             2              8  2cpu-linux-x64
+  # m7i.xlarge            4             16  4cpu-linux-x64
+  # c7i.2xlarge           8             16  8cpu-linux-x64
+  # c7i.4xlarge          16             32  16cpu-linux-x64
+  # m7i-flex.8xlarge     32            128  32cpu-linux-x64
+  # c7i.12xlarge         48             96  48cpu-linux-x64
+  # c7a.16xlarge         64            128  64cpu-linux-x64
+  nf-test:
+    uses: ./.github/workflows/nf-test-reusable.yml
+    strategy:
+      matrix:
+        include:
+          - name: small
+            tags: cicd
+            runson_instance_type: 4cpu-linux-x64
+            runson_volume_size: 60gb
+          - name: large
+            tags: cicd.large
+            runson_instance_type: 32cpu-linux-x64
+            runson_volume_size: 200gb
+    with:
+      name: ${{ matrix.name }}
+      tags: ${{ matrix.tags }}
+      runson_instance_type: ${{ matrix.runson_instance_type }}
+      runson_volume_size: ${{ matrix.runson_volume_size }}
+
+  confirm-pass:
+    needs: [nf-test]
+    if: always()
+    runs-on: # use self-hosted runners
+      - runs-on=${{ github.run_id }}-confirm-pass
+      - runner=1cpu-linux-x64
+    steps:
+      - name: One or more tests failed (excluding latest-everything)
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: exit 1
+
+      - name: One or more tests cancelled
+        if: ${{ contains(needs.*.result, 'cancelled') }}
+        run: exit 1
+
+      - name: All tests ok
+        if: ${{ contains(needs.*.result, 'success') }}
+        run: exit 0
+
+      - name: debug-print
+        if: always()
+        run: |
+          echo "::group::DEBUG: `needs` Contents"
+          echo "DEBUG: toJSON(needs) = ${{ toJSON(needs) }}"
+          echo "DEBUG: toJSON(needs.*.result) = ${{ toJSON(needs.*.result) }}"
+          echo "::endgroup::"
