@@ -25,7 +25,8 @@ include { PAVE_ANNOTATION       } from '../subworkflows/local/pave_annotation'
 include { PEACH_CALLING         } from '../subworkflows/local/peach_calling'
 include { PREPARE_REFERENCE     } from '../subworkflows/local/prepare_reference'
 include { PURPLE_CALLING        } from '../subworkflows/local/purple_calling'
-include { READ_ALIGNMENT_DNA    } from '../subworkflows/local/read_alignment_dna'
+include { READ_ALIGNMENT_DNA            } from '../subworkflows/local/read_alignment_dna'
+include { READ_ALIGNMENT_DNA_PARABRICKS } from '../subworkflows/local/read_alignment_dna_parabricks'
 include { READ_ALIGNMENT_RNA    } from '../subworkflows/local/read_alignment_rna'
 include { REDUX_PROCESSING      } from '../subworkflows/local/redux_processing'
 include { SAGE_APPEND           } from '../subworkflows/local/sage_append'
@@ -88,16 +89,42 @@ workflow WGTS {
     ch_align_rna_tumor_out = Channel.empty()
     if (run_config.stages.alignment) {
 
-        READ_ALIGNMENT_DNA(
-            ch_inputs,
-            ref_data.genome_fasta,
-            ref_data.genome_bwamem2_index,
-            params.max_fastq_records,
-            false,  // umi_enable
-            '',  // umi_location
-            0,  // umi_length
-            -1,  // umi_skip
-        )
+        if (params.aligner == 'parabricks') {
+
+            READ_ALIGNMENT_DNA_PARABRICKS(
+                ch_inputs,
+                ref_data.genome_fasta,
+                ref_data.genome_bwa_index,
+                false,  // umi_enable
+                '',  // umi_location
+                0,  // umi_length
+                -1,  // umi_skip
+            )
+
+            ch_dna_tumor  = READ_ALIGNMENT_DNA_PARABRICKS.out.dna_tumor
+            ch_dna_normal = READ_ALIGNMENT_DNA_PARABRICKS.out.dna_normal
+            ch_dna_donor  = READ_ALIGNMENT_DNA_PARABRICKS.out.dna_donor
+            ch_dna_versions = READ_ALIGNMENT_DNA_PARABRICKS.out.versions
+
+        } else {
+
+            READ_ALIGNMENT_DNA(
+                ch_inputs,
+                ref_data.genome_fasta,
+                ref_data.genome_bwamem2_index,
+                params.max_fastq_records,
+                false,  // umi_enable
+                '',  // umi_location
+                0,  // umi_length
+                -1,  // umi_skip
+            )
+
+            ch_dna_tumor  = READ_ALIGNMENT_DNA.out.dna_tumor
+            ch_dna_normal = READ_ALIGNMENT_DNA.out.dna_normal
+            ch_dna_donor  = READ_ALIGNMENT_DNA.out.dna_donor
+            ch_dna_versions = READ_ALIGNMENT_DNA.out.versions
+
+        }
 
         READ_ALIGNMENT_RNA(
             ch_inputs,
@@ -105,13 +132,13 @@ workflow WGTS {
         )
 
         ch_versions = ch_versions.mix(
-            READ_ALIGNMENT_DNA.out.versions,
+            ch_dna_versions,
             READ_ALIGNMENT_RNA.out.versions,
         )
 
-        ch_align_dna_tumor_out = ch_align_dna_tumor_out.mix(READ_ALIGNMENT_DNA.out.dna_tumor)
-        ch_align_dna_normal_out = ch_align_dna_normal_out.mix(READ_ALIGNMENT_DNA.out.dna_normal)
-        ch_align_dna_donor_out = ch_align_dna_donor_out.mix(READ_ALIGNMENT_DNA.out.dna_donor)
+        ch_align_dna_tumor_out = ch_align_dna_tumor_out.mix(ch_dna_tumor)
+        ch_align_dna_normal_out = ch_align_dna_normal_out.mix(ch_dna_normal)
+        ch_align_dna_donor_out = ch_align_dna_donor_out.mix(ch_dna_donor)
         ch_align_rna_tumor_out = ch_align_rna_tumor_out.mix(READ_ALIGNMENT_RNA.out.rna_tumor)
 
     } else {

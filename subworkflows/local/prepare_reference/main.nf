@@ -13,6 +13,7 @@ include { STAR_GENOMEGENERATE   } from '../../../modules/nf-core/star/genomegene
 include { GRIDSS_INDEX          } from '../../../modules/local/gridss/index/main'
 
 include { CUSTOM_EXTRACTTARBALL as DECOMP_BWAMEM2_INDEX } from '../../../modules/local/custom/extract_tarball/main'
+include { CUSTOM_EXTRACTTARBALL as DECOMP_BWA_INDEX     } from '../../../modules/local/custom/extract_tarball/main'
 include { CUSTOM_EXTRACTTARBALL as DECOMP_GRIDSS_INDEX  } from '../../../modules/local/custom/extract_tarball/main'
 include { CUSTOM_EXTRACTTARBALL as DECOMP_HMF_DATA      } from '../../../modules/local/custom/extract_tarball/main'
 include { CUSTOM_EXTRACTTARBALL as DECOMP_PANEL_DATA    } from '../../../modules/local/custom/extract_tarball/main'
@@ -107,6 +108,33 @@ workflow PREPARE_REFERENCE {
         } else {
 
             ch_genome_bwamem2_index = getRefFileChannel('ref_data_genome_bwamem2_index')
+
+        }
+    }
+
+    //
+    // Set classic BWA index (used by Parabricks fq2bam), unpack or create if required
+    //
+    ch_genome_bwa_index = Channel.empty()
+    if (prep_config.require_bwa_index) {
+
+        if (!params.ref_data_genome_bwa_index) {
+
+            BWA_INDEX(ch_genome_fasta.map { [[id: 'bwa_index'], it] })
+            ch_genome_bwa_index = BWA_INDEX.out.index.map { meta, idx -> idx }
+            ch_versions = ch_versions.mix(BWA_INDEX.out.versions)
+
+        } else if (params.ref_data_genome_bwa_index.endsWith('.tar.gz')) {
+
+            ch_genome_bwa_index_inputs = Channel.fromPath(params.ref_data_genome_bwa_index)
+                .map { [[id: "${it.name.replaceAll('\\.tar\\.gz$', '')}"], it] }
+
+            DECOMP_BWA_INDEX(ch_genome_bwa_index_inputs)
+            ch_genome_bwa_index = DECOMP_BWA_INDEX.out.extracted_dir
+
+        } else {
+
+            ch_genome_bwa_index = getRefFileChannel('ref_data_genome_bwa_index')
 
         }
     }
@@ -284,6 +312,7 @@ workflow PREPARE_REFERENCE {
     genome_dict          = ch_genome_dict.first()          // path: genome_dict
     genome_img           = ch_genome_img.first()           // path: genome_img
     genome_bwamem2_index = ch_genome_bwamem2_index.first() // path: genome_bwa-mem2_index
+    genome_bwa_index     = ch_genome_bwa_index.ifEmpty([]).first() // path: genome_bwa_index (Parabricks)
     genome_gridss_index  = ch_genome_gridss_index.first()  // path: genome_gridss_index
     genome_star_index    = ch_genome_star_index.first()    // path: genome_star_index
     genome_version       = ch_genome_version               // val:  genome_version

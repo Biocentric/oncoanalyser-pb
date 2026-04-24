@@ -343,7 +343,8 @@ class WorkflowMain {
             require_dict: true,
             require_img: true,
 
-            require_bwamem2_index: run_config.has_dna_fastq && run_config.stages.alignment,
+            require_bwamem2_index: run_config.has_dna_fastq && run_config.stages.alignment && params.aligner == 'bwa-mem2',
+            require_bwa_index: run_config.has_dna_fastq && run_config.stages.alignment && params.aligner == 'parabricks',
             require_star_index: run_config.has_rna_fastq && run_config.stages.alignment,
 
             require_gridss_index: run_config.has_dna && run_config.mode === Constants.RunMode.WGTS && run_config.stages.virusinterpreter,
@@ -419,7 +420,8 @@ class WorkflowMain {
             require_dict: require_dict,
             require_img: require_img,
 
-            require_bwamem2_index: require_bwamem2_index,
+            require_bwamem2_index: require_bwamem2_index && params.aligner == 'bwa-mem2',
+            require_bwa_index: require_bwamem2_index && params.aligner == 'parabricks',
             require_star_index: require_star_index,
 
             require_gridss_index: require_gridss_index,
