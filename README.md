@@ -240,6 +240,13 @@ Please refer to [this page](https://github.com/nf-core/oncoanalyser/issues/177) 
 
 ## Credits
 
+### Parabricks fork (`oncoanalyser-pb`)
+
+The Parabricks GPU alignment integration in this fork is maintained by **Sander Bervoets**
+([Biocentric](https://www.biocentric.nl)).
+
+### Upstream `oncoanalyser`
+
 The `oncoanalyser` pipeline was written and is maintained by Stephen Watts ([@scwatts](https://github.com/scwatts)) from
 the [Genomics Platform
 Group](https://mdhs.unimelb.edu.au/centre-for-cancer-research/our-research/genomics-platform-group) at the [University
