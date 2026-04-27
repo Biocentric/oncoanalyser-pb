@@ -5,6 +5,11 @@
   </picture>
 </h1>
 
+> [!IMPORTANT]
+> **This is `oncoanalyser-pb`, a Biocentric fork of [nf-core/oncoanalyser](https://github.com/nf-core/oncoanalyser) `2.3.0`** that adds an opt-in GPU-accelerated DNA alignment path via [NVIDIA Parabricks](https://www.nvidia.com/en-us/clara/genomics/) `4.0.1`.
+> The CPU BWA-MEM2 path remains the default and is unchanged. Switch with `--aligner parabricks` plus a hardware profile (`p40_single`, `v100_multi`, `blackwell`).
+> See [GPU acceleration with Parabricks](#gpu-acceleration-with-parabricks) below.
+
 [![GitHub Actions CI Status](https://github.com/nf-core/oncoanalyser/actions/workflows/nf-test.yml/badge.svg)](https://github.com/nf-core/oncoanalyser/actions/workflows/nf-test.yml)
 [![GitHub Actions Linting Status](https://github.com/nf-core/oncoanalyser/actions/workflows/linting.yml/badge.svg)](https://github.com/nf-core/oncoanalyser/actions/workflows/linting.yml)
 [![AWS CI](https://img.shields.io/badge/CI%20tests-full%20size-FF9900?labelColor=000000&logo=Amazon%20AWS)](https://nf-co.re/oncoanalyser/results)
@@ -57,7 +62,7 @@ the tool information below primarily relates to the `wgts` and `targeted` analys
 > [!NOTE]
 > Due to the limitations of panel data, certain tools (indicated with `*` below) do not run in `targeted` mode.
 
-- Read alignment: [BWA-MEM2](https://github.com/bwa-mem2/bwa-mem2) (DNA), [STAR](https://github.com/alexdobin/STAR) (RNA)
+- Read alignment: [BWA-MEM2](https://github.com/bwa-mem2/bwa-mem2) (DNA, default) or [NVIDIA Parabricks `fq2bam`](#gpu-acceleration-with-parabricks) (DNA, GPU, opt-in), [STAR](https://github.com/alexdobin/STAR) (RNA)
 - Read post-processing: [REDUX](https://github.com/hartwigmedical/hmftools/tree/master/redux) (DNA), [Picard MarkDuplicates](https://gatk.broadinstitute.org/hc/en-us/articles/360037052812-MarkDuplicates-Picard) (RNA)
 - SNV, MNV, INDEL calling: [SAGE](https://github.com/hartwigmedical/hmftools/tree/master/sage), [PAVE](https://github.com/hartwigmedical/hmftools/tree/master/pave)
 - SV calling: [ESVEE](https://github.com/hartwigmedical/hmftools/tree/master/esvee)
@@ -76,6 +81,104 @@ the tool information below primarily relates to the `wgts` and `targeted` analys
 For the `purity_estimate` mode, several of the above tools are run with adjusted configuration in addition to the following.
 
 - Tumor fraction estimation: [WISP](https://github.com/hartwigmedical/hmftools/tree/master/wisp)
+
+## GPU acceleration with Parabricks
+
+This fork adds an opt-in GPU-accelerated DNA alignment path using
+[NVIDIA Parabricks](https://docs.nvidia.com/clara/parabricks/4.0.1/) `4.0.1`. It replaces the CPU
+BWA-MEM2 step with `pbrun fq2bam` while leaving everything downstream — REDUX, SAGE, PURPLE, LINX,
+the rest of the WiGiTS chain — untouched. The pipeline still produces oncoanalyser outputs
+identical in structure to the BWA-MEM2 path.
+
+The CPU BWA-MEM2 path remains the default. To activate the GPU path, set `--aligner parabricks`
+plus a hardware profile, as shown below.
+
+### Why this design
+
+- **Alignment only on GPU.** `fq2bam` is invoked with `--no-markdups`. Duplicate marking is left
+  to [REDUX](https://github.com/hartwigmedical/hmftools/tree/master/redux), whose dedup and UMI
+  consensus logic is tuned for SAGE's somatic error model. Running Picard-style markdup twice
+  would only waste cycles.
+- **VCFs are not handed over.** Oncoanalyser calls somatic variants with SAGE (not Mutect2 or
+  DeepVariant). The integration point is therefore the BAM, not the VCF.
+- **Reference is the HMF bundle.** The same FASTA powers Parabricks alignment and all downstream
+  hmftools. HMF ships a BWA-MEM2 index but not a classic BWA index, so the pipeline builds a
+  classic BWA index from the FASTA on first run and caches it; alternatively you can supply
+  `--ref_data_genome_bwa_index` pointing to a prebuilt directory or `.tar.gz`.
+- **VRAM-tiered labels** (`gpu_16gb`, `gpu_24gb`, `gpu_32gb`) keep module code portable across
+  GPU generations; concrete device count and concurrency live in the per-hardware profiles.
+
+### Hardware requirements
+
+Parabricks `4.0.1` officially supports Volta and newer (V100, T4, A100, …). The Pascal P40
+(24 GB) is not on the official list but is verified working in this fork on real somatic WGS
+data; consumer Pascal cards (e.g. GTX 1080 Ti) are not supported. Blackwell consumer 16 GB cards
+are usable for development but tighter for high-coverage WGS — start with the P40 / V100 path.
+
+| Profile        | Target hardware                                | fq2bam concurrency      |
+|----------------|------------------------------------------------|-------------------------|
+| `p40_single`   | Single NVIDIA Tesla P40 (Pascal, 24 GB)        | one sample at a time    |
+| `v100_multi`   | Multi-V100 node                                | one sample, multi-GPU   |
+| `blackwell`    | Single Blackwell consumer GPU (16 GB)          | one sample at a time    |
+
+CPU steps (REDUX, SAGE, PURPLE, …) keep running in parallel for other samples while a GPU job is
+in flight, so single-GPU throughput is governed by `fq2bam` runtime, not by serial blocking.
+
+### Container runtime
+
+Only Docker (with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html))
+and Singularity / Apptainer (`--nv`) are supported. The Parabricks module pins the digest of
+`nvcr.io/nvidia/clara/clara-parabricks:4.0.1-1`. Conda / Mamba profiles cannot be used with the
+GPU path and the module errors out cleanly if combined.
+
+### Quick start (P40)
+
+```bash
+nextflow run Biocentric/oncoanalyser-pb \
+  -profile docker,gpu,p40_single \
+  -revision main \
+  --mode wgts \
+  --genome GRCh37_hmf \
+  --aligner parabricks \
+  --input samplesheet.csv \
+  --outdir output/
+```
+
+`-profile gpu` enables `--gpus all` for Docker (or `--nv` for Singularity / Apptainer).
+`-profile p40_single` pins `params.aligner = parabricks` and serializes `fq2bam` invocations to
+one at a time on the single P40, while letting CPU-bound downstream steps run in parallel.
+
+For multi-V100 nodes, swap `p40_single` for `v100_multi`. For a Blackwell test box, use
+`blackwell`.
+
+### Switching between CPU and GPU paths
+
+`--aligner` is the only knob that needs to change. With `bwa-mem2` (default) the pipeline behaves
+exactly like upstream nf-core/oncoanalyser 2.3.0; with `parabricks` it routes DNA FASTQs through
+`fq2bam` instead. You can mix samplesheets that start from FASTQ (aligner runs) with samplesheets
+that start from BAM (aligner is skipped, BAMs feed straight into REDUX) — the `aligner` switch
+only governs FASTQ inputs.
+
+### Reference data
+
+| Genome attribute | Source                                      |
+|------------------|---------------------------------------------|
+| `fasta` / `fai` / `dict` | HMF bundle (`GRCh37_hmf` or `GRCh38_hmf`) |
+| `bwamem2_index`          | HMF bundle (used by the CPU path)         |
+| `bwa_index` (classic)    | Built from `fasta` on first run, or supply `--ref_data_genome_bwa_index` (directory or `.tar.gz`) |
+
+GRCh37 is the default for testing in this fork; GRCh38 is supported by changing
+`--genome GRCh38_hmf`.
+
+### Limitations / known follow-ups
+
+- Multi-lane samples currently invoke `fq2bam` once per lane (matches the BWA-MEM2 channel
+  shape) and merge in REDUX downstream. Collapsing into a single `fq2bam` call per sample with
+  multiple `--in-fq` entries is a planned optimization.
+- A dedicated `test_parabricks` profile is not yet wired; for a small dry-run, point at the
+  oncoanalyser chr21 T/N test data and add `-profile docker,gpu,p40_single --aligner parabricks`.
+- UMI processing on the Parabricks path has not been validated. Set `redux_umi_enabled = true`
+  with caution.
 
 ## Usage
 
