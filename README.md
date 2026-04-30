@@ -6,7 +6,7 @@
 </h1>
 
 > [!IMPORTANT]
-> **This is `oncoanalyser-pb`, a Biocentric fork of [nf-core/oncoanalyser](https://github.com/nf-core/oncoanalyser) `2.3.0`** that adds an opt-in GPU-accelerated DNA alignment path via [NVIDIA Parabricks](https://www.nvidia.com/en-us/clara/genomics/) `4.0.1`.
+> **This is `oncoanalyser-pb`, a Biocentric fork of [nf-core/oncoanalyser](https://github.com/nf-core/oncoanalyser) `2.3.0`** that adds an opt-in GPU-accelerated DNA alignment path via [NVIDIA Parabricks](https://www.nvidia.com/en-us/clara/genomics/) `4.0.0`.
 > The CPU BWA-MEM2 path remains the default and is unchanged. Switch with `--aligner parabricks` plus a hardware profile (`p40_single`, `v100_multi`, `blackwell`).
 > See [GPU acceleration with Parabricks](#gpu-acceleration-with-parabricks) below.
 
@@ -85,7 +85,7 @@ For the `purity_estimate` mode, several of the above tools are run with adjusted
 ## GPU acceleration with Parabricks
 
 This fork adds an opt-in GPU-accelerated DNA alignment path using
-[NVIDIA Parabricks](https://docs.nvidia.com/clara/parabricks/4.0.1/) `4.0.1`. It replaces the CPU
+[NVIDIA Parabricks](https://docs.nvidia.com/clara/parabricks/4.0.0/) `4.0.0`. It replaces the CPU
 BWA-MEM2 step with `pbrun fq2bam` while leaving everything downstream — REDUX, SAGE, PURPLE, LINX,
 the rest of the WiGiTS chain — untouched. The pipeline still produces oncoanalyser outputs
 identical in structure to the BWA-MEM2 path.
@@ -110,7 +110,7 @@ plus a hardware profile, as shown below.
 
 ### Hardware requirements
 
-Parabricks `4.0.1` officially supports Volta and newer (V100, T4, A100, …). The Pascal P40
+Parabricks `4.0.0` officially supports Volta and newer (V100, T4, A100, …). The Pascal P40
 (24 GB) is not on the official list but is verified working in this fork on real somatic WGS
 data; consumer Pascal cards (e.g. GTX 1080 Ti) are not supported. Blackwell consumer 16 GB cards
 are usable for development but tighter for high-coverage WGS — start with the P40 / V100 path.
@@ -128,7 +128,7 @@ in flight, so single-GPU throughput is governed by `fq2bam` runtime, not by seri
 
 Only Docker (with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html))
 and Singularity / Apptainer (`--nv`) are supported. The Parabricks module pins the digest of
-`nvcr.io/nvidia/clara/clara-parabricks:4.0.1-1`. Conda / Mamba profiles cannot be used with the
+`nvcr.io/nvidia/clara/clara-parabricks:4.0.0-1`. Conda / Mamba profiles cannot be used with the
 GPU path and the module errors out cleanly if combined.
 
 ### Quick start (P40)

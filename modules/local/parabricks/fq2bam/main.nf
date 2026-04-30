@@ -1,4 +1,4 @@
-// Local Parabricks fq2bam module pinned to 4.0.1-1.
+// Local Parabricks fq2bam module pinned to 4.0.0-1.
 // GPU-accelerated BWA-MEM alignment + coordinate sort. MarkDuplicates is
 // intentionally disabled — Redux performs dedup downstream with HMF-tuned logic.
 
@@ -13,7 +13,7 @@ process PARABRICKS_FQ2BAM {
     // clobbering the shared work cache.
     stageInMode 'copy'
 
-    container "nvcr.io/nvidia/clara/clara-parabricks:4.0.1-1"
+    container "nvcr.io/nvidia/clara/clara-parabricks:4.0.0-1"
 
     input:
     tuple val(meta), path(reads_fwd), path(reads_rev)
@@ -51,7 +51,7 @@ process PARABRICKS_FQ2BAM {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        parabricks: \$(pbrun version 2>&1 | grep -m1 '^pbrun:' | sed 's/^pbrun:[[:space:]]*//' || echo "4.0.1-1")
+        parabricks: \$(pbrun version 2>&1 | grep -m1 '^pbrun:' | sed 's/^pbrun:[[:space:]]*//' || echo "4.0.0-1")
     END_VERSIONS
     """
 
@@ -62,7 +62,7 @@ process PARABRICKS_FQ2BAM {
     touch ${prefix}.bam.bai
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        parabricks: "4.0.1-1"
+        parabricks: "4.0.0-1"
     END_VERSIONS
     """
 }
