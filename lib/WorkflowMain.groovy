@@ -334,7 +334,7 @@ class WorkflowMain {
         ]
     }
 
-    public static getPrepConfigFromSamplesheet(run_config) {
+    public static getPrepConfigFromSamplesheet(run_config, params) {
         return [
             prepare_ref_data_only: false,
 
