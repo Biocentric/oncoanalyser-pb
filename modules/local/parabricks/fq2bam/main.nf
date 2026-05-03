@@ -46,7 +46,6 @@ process PARABRICKS_FQ2BAM {
         --out-bam ${prefix}.bam \\
         --no-markdups \\
         ${num_gpus} \\
-        --bwa-cpu-thread-pool ${task.cpus} \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml
