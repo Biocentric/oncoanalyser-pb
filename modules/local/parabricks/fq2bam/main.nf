@@ -1,6 +1,13 @@
 // Local Parabricks fq2bam module pinned to 4.0.0-1.
-// GPU-accelerated BWA-MEM alignment + coordinate sort. MarkDuplicates is
-// intentionally disabled — Redux performs dedup downstream with HMF-tuned logic.
+// GPU-accelerated BWA-MEM alignment + coordinate sort + MarkDuplicates.
+//
+// We initially planned to run with --no-markdups (letting REDUX handle all
+// dedup), but fq2bam only writes mate CIGAR (MC) tags as a side effect of
+// MarkDuplicates, and REDUX requires MC on every paired read. Letting
+// Parabricks markdup is the cheapest way to get MC tags in. REDUX still runs
+// downstream and applies its own HMF-tuned dedup logic on top, setting its
+// own duplicate flags — so output correctness is unaffected by the upstream
+// marking.
 
 process PARABRICKS_FQ2BAM {
     tag "${meta.id}"
