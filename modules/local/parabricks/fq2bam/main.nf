@@ -35,7 +35,9 @@ process PARABRICKS_FQ2BAM {
     def prefix    = task.ext.prefix ?: "${meta.id}"
     def num_gpus  = task.accelerator ? "--num-gpus ${task.accelerator.request}" : '--num-gpus 1'
     def rg_id     = meta.read_group ?: "${meta.sample_id}.${meta.library_id}.${meta.lane}"
-    def rg_string = "@RG\\tID:${rg_id}\\tSM:${meta.sample_id}\\tLB:${meta.library_id}\\tPL:ILLUMINA"
+    // Parabricks 4.0.0 fq2bam requires PU (Platform Unit) in the read group;
+    // we reuse rg_id (sample.library.lane) since flowcell info isn't tracked.
+    def rg_string = "@RG\\tID:${rg_id}\\tSM:${meta.sample_id}\\tLB:${meta.library_id}\\tPL:ILLUMINA\\tPU:${rg_id}"
     """
     INDEX=\$(find -L ./ -name "*.amb" | sed 's/\\.amb\$//')
     cp ${fasta} \$INDEX
