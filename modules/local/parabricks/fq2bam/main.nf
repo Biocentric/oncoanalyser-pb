@@ -1,13 +1,13 @@
 // Local Parabricks fq2bam module pinned to 4.0.0-1.
-// GPU-accelerated BWA-MEM alignment + coordinate sort + MarkDuplicates.
+// GPU-accelerated BWA-MEM alignment + coordinate sort, with `--no-markdups`
+// (REDUX handles dedup downstream).
 //
-// We initially planned to run with --no-markdups (letting REDUX handle all
-// dedup), but fq2bam only writes mate CIGAR (MC) tags as a side effect of
-// MarkDuplicates, and REDUX requires MC on every paired read. Letting
-// Parabricks markdup is the cheapest way to get MC tags in. REDUX still runs
-// downstream and applies its own HMF-tuned dedup logic on top, setting its
-// own duplicate flags — so output correctness is unaffected by the upstream
-// marking.
+// Parabricks 4.0.0's GPU BWA implementation does NOT emit mate CIGAR (MC)
+// tags, even with MarkDuplicates enabled. REDUX requires MC on every paired
+// read, so we post-process the fq2bam output with:
+//   samtools sort -n  →  samtools fixmate -m  →  samtools sort
+// to explicitly compute MC (and MS) tags before handing the BAM to REDUX.
+// The Parabricks container bundles samtools so this stays in one container.
 
 process PARABRICKS_FQ2BAM {
     tag "${meta.id}"
@@ -52,13 +52,27 @@ process PARABRICKS_FQ2BAM {
     pbrun fq2bam \\
         --ref \$INDEX \\
         --in-fq ${reads_fwd} ${reads_rev} "${rg_string}" \\
-        --out-bam ${prefix}.bam \\
+        --out-bam ${prefix}.pb.bam \\
+        --no-markdups \\
         ${num_gpus} \\
         ${args}
+
+    # Add mate CIGAR (MC) and mate score (MS) tags. Parabricks GPU BWA does
+    # not write these; REDUX downstream requires MC. Three-stage sort/fixmate
+    # is unavoidable because samtools fixmate requires name-sorted input and
+    # REDUX expects coord-sorted output.
+    samtools sort -n -@ ${task.cpus} -O bam -T fixmate_namesort -o ${prefix}.namesorted.bam ${prefix}.pb.bam
+    rm ${prefix}.pb.bam
+    samtools fixmate -m -@ ${task.cpus} ${prefix}.namesorted.bam ${prefix}.fixmate.bam
+    rm ${prefix}.namesorted.bam
+    samtools sort -@ ${task.cpus} -O bam -T fixmate_coordsort -o ${prefix}.bam ${prefix}.fixmate.bam
+    rm ${prefix}.fixmate.bam
+    samtools index -@ ${task.cpus} ${prefix}.bam
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         parabricks: \$(pbrun version 2>&1 | grep -m1 '^pbrun:' | sed 's/^pbrun:[[:space:]]*//' || echo "4.0.0-1")
+        samtools: \$(samtools --version | sed -n '/^samtools / { s/^.* //p }' | head -n1)
     END_VERSIONS
     """
 
