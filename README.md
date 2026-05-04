@@ -95,10 +95,13 @@ plus a hardware profile, as shown below.
 
 ### Why this design
 
-- **Alignment only on GPU.** `fq2bam` is invoked with `--no-markdups`. Duplicate marking is left
-  to [REDUX](https://github.com/hartwigmedical/hmftools/tree/master/redux), whose dedup and UMI
-  consensus logic is tuned for SAGE's somatic error model. Running Picard-style markdup twice
-  would only waste cycles.
+- **Alignment + MarkDuplicates on GPU.** `fq2bam` runs with its default MarkDuplicates step
+  enabled. We initially planned to skip it (`--no-markdups`) and let
+  [REDUX](https://github.com/hartwigmedical/hmftools/tree/master/redux) handle all dedup, but
+  fq2bam only writes mate CIGAR (MC) tags as a side effect of MarkDuplicates, and REDUX
+  requires MC on every paired read. Letting Parabricks markdup keeps the GPU work cheap and
+  produces an MC-annotated BAM. REDUX still runs downstream with its HMF-tuned logic and sets
+  its own dup flags, so output correctness is unchanged.
 - **VCFs are not handed over.** Oncoanalyser calls somatic variants with SAGE (not Mutect2 or
   DeepVariant). The integration point is therefore the BAM, not the VCF.
 - **Reference is the HMF bundle.** The same FASTA powers Parabricks alignment and all downstream

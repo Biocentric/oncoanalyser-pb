@@ -46,7 +46,6 @@ process PARABRICKS_FQ2BAM {
         --ref \$INDEX \\
         --in-fq ${reads_fwd} ${reads_rev} "${rg_string}" \\
         --out-bam ${prefix}.bam \\
-        --no-markdups \\
         ${num_gpus} \\
         ${args}
 
