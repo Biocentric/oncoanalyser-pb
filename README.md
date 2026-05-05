@@ -95,13 +95,16 @@ plus a hardware profile, as shown below.
 
 ### Why this design
 
-- **Alignment + MarkDuplicates on GPU.** `fq2bam` runs with its default MarkDuplicates step
-  enabled. We initially planned to skip it (`--no-markdups`) and let
-  [REDUX](https://github.com/hartwigmedical/hmftools/tree/master/redux) handle all dedup, but
-  fq2bam only writes mate CIGAR (MC) tags as a side effect of MarkDuplicates, and REDUX
-  requires MC on every paired read. Letting Parabricks markdup keeps the GPU work cheap and
-  produces an MC-annotated BAM. REDUX still runs downstream with its HMF-tuned logic and sets
-  its own dup flags, so output correctness is unchanged.
+- **Alignment-only on GPU; dedup is REDUX's job.** `fq2bam` runs with `--no-markdups`. Duplicate
+  marking is left to [REDUX](https://github.com/hartwigmedical/hmftools/tree/master/redux),
+  whose dedup and (optional) UMI consensus logic is tuned for SAGE's somatic error model.
+- **`samtools fixmate` post-process to add mate CIGAR (MC) tags.** Parabricks 4.0.0's GPU BWA
+  implementation does not emit MC tags — even with MarkDuplicates enabled — and REDUX rejects
+  reads without MC. The Parabricks module therefore chains `samtools sort -n → samtools fixmate
+  -m → samtools sort` after `fq2bam` to compute MC (and MS) tags before handing the BAM
+  downstream. The Parabricks container bundles samtools, so this stays in one container. The
+  three-stage sort/fixmate/sort costs roughly an extra 10–20% of fq2bam wall-time on real WGS;
+  it's a one-shot fix for an upstream limitation we'd otherwise hit forever.
 - **VCFs are not handed over.** Oncoanalyser calls somatic variants with SAGE (not Mutect2 or
   DeepVariant). The integration point is therefore the BAM, not the VCF.
 - **Reference is the HMF bundle.** The same FASTA powers Parabricks alignment and all downstream
@@ -114,9 +117,11 @@ plus a hardware profile, as shown below.
 ### Hardware requirements
 
 Parabricks `4.0.0` officially supports Volta and newer (V100, T4, A100, …). The Pascal P40
-(24 GB) is not on the official list but is verified working in this fork on real somatic WGS
-data; consumer Pascal cards (e.g. GTX 1080 Ti) are not supported. Blackwell consumer 16 GB cards
-are usable for development but tighter for high-coverage WGS — start with the P40 / V100 path.
+(24 GB) is not on the official list but is **verified working** in this fork — the chr21
+synthetic test dataset has been run end-to-end through `fq2bam → samtools fixmate → REDUX →
+SAGE → AMBER → COBALT → PURPLE → LINX` on a single P40, GRCh38_hmf reference. Consumer Pascal
+cards (e.g. GTX 1080 Ti) are not supported. Blackwell consumer 16 GB cards are usable for
+development but tighter for high-coverage WGS — start with the P40 / V100 path.
 
 | Profile        | Target hardware                                | fq2bam concurrency      |
 |----------------|------------------------------------------------|-------------------------|
@@ -175,13 +180,37 @@ GRCh37 is the default for testing in this fork; GRCh38 is supported by changing
 
 ### Limitations / known follow-ups
 
+- **Validated on the upstream chr21 synthetic test dataset (DNA-only) on a single P40.**
+  Production-scale somatic WGS validation against a CPU-path baseline is still pending —
+  output equivalence between `--aligner bwa-mem2` and `--aligner parabricks` has not been
+  formally checked.
+- The upstream `test` profile bundles RNA samples that exercise STAR, which has an unrelated
+  thread-cleanup hang on small input. For now, run the Parabricks DNA path with
+  `--processes_exclude isofox` and a DNA-only samplesheet (filter rows where
+  `sequence_type == "dna"`).
+- The upstream `test` profile sets `process.resourceLimits` to `cpus: 4, memory: 30.GB,
+  time: 1.h`, which is too tight for full reference prep. Run with a small `-c` override that
+  raises those caps to match the workstation (see `local.config` example below).
 - Multi-lane samples currently invoke `fq2bam` once per lane (matches the BWA-MEM2 channel
   shape) and merge in REDUX downstream. Collapsing into a single `fq2bam` call per sample with
   multiple `--in-fq` entries is a planned optimization.
-- A dedicated `test_parabricks` profile is not yet wired; for a small dry-run, point at the
-  oncoanalyser chr21 T/N test data and add `-profile docker,gpu,p40_single --aligner parabricks`.
+- A dedicated `test_parabricks` profile is not yet wired.
 - UMI processing on the Parabricks path has not been validated. Set `redux_umi_enabled = true`
   with caution.
+
+#### Example `local.config` for the test profile
+
+```nextflow
+process {
+    resourceLimits = [
+        cpus: 16,
+        memory: '128.GB',
+        time: '12.h'
+    ]
+}
+```
+
+Pass with `-c local.config`.
 
 ## Usage
 
