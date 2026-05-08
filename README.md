@@ -98,13 +98,13 @@ plus a hardware profile, as shown below.
 - **Alignment-only on GPU; dedup is REDUX's job.** `fq2bam` runs with `--no-markdups`. Duplicate
   marking is left to [REDUX](https://github.com/hartwigmedical/hmftools/tree/master/redux),
   whose dedup and (optional) UMI consensus logic is tuned for SAGE's somatic error model.
-- **`samtools fixmate` post-process to add mate CIGAR (MC) tags.** Parabricks 4.0.0's GPU BWA
-  implementation does not emit MC tags — even with MarkDuplicates enabled — and REDUX rejects
-  reads without MC. The Parabricks module therefore chains `samtools sort -n → samtools fixmate
-  -m → samtools sort` after `fq2bam` to compute MC (and MS) tags before handing the BAM
-  downstream. The Parabricks container bundles samtools, so this stays in one container. The
-  three-stage sort/fixmate/sort costs roughly an extra 10–20% of fq2bam wall-time on real WGS;
-  it's a one-shot fix for an upstream limitation we'd otherwise hit forever.
+- **`samtools collate → fixmate → sort` post-process to add mate CIGAR (MC) tags.** Parabricks
+  4.0.0's GPU BWA implementation does not emit MC tags — even with MarkDuplicates enabled — and
+  REDUX rejects reads without MC. The Parabricks module therefore streams the fq2bam output
+  through `samtools collate` (fast pair-grouping, not a full name-sort) into `samtools fixmate
+  -m` (writes MC and MS) into a coordinate `samtools sort`. Pipe-streamed, so only one
+  intermediate full-size BAM exists on disk at a time. The Parabricks container bundles
+  samtools, so this stays in one container.
 - **VCFs are not handed over.** Oncoanalyser calls somatic variants with SAGE (not Mutect2 or
   DeepVariant). The integration point is therefore the BAM, not the VCF.
 - **Reference is the HMF bundle.** The same FASTA powers Parabricks alignment and all downstream
@@ -198,7 +198,7 @@ GRCh37 is the default for testing in this fork; GRCh38 is supported by changing
 - UMI processing on the Parabricks path has not been validated. Set `redux_umi_enabled = true`
   with caution.
 
-#### Example `local.config` for the test profile
+#### Example `local.config` for the upstream `test` profile
 
 ```nextflow
 process {
@@ -211,6 +211,30 @@ process {
 ```
 
 Pass with `-c local.config`.
+
+> [!WARNING]
+> **Do not reuse this `resourceLimits` block for production WGS runs.** The
+> upstream `test` profile caps every process at 1h / 4 CPU / 30 GB; the override
+> above only lifts those caps enough to get the small chr21 dataset through.
+>
+> Real WGS on a single Pascal P40 takes **12–16h+** for `fq2bam` alone (the GPU
+> is slow on Pascal). On a deep tumor sample with 100x+ coverage we observed
+> the run silently terminate at the 12h cap with no informative error. For
+> production runs, either omit `resourceLimits` entirely or set it to something
+> that won't bite (e.g. `time: '96.h'`):
+>
+> ```nextflow
+> process {
+>     resourceLimits = [
+>         cpus: 16,
+>         memory: '140.GB',
+>         time: '96.h'
+>     ]
+> }
+> ```
+>
+> The PARABRICKS_FQ2BAM process itself requests 96h via `accelerators.config`,
+> but a tighter `resourceLimits` cap will silently override it.
 
 ## Usage
 

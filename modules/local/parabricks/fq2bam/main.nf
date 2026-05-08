@@ -4,9 +4,11 @@
 //
 // Parabricks 4.0.0's GPU BWA implementation does NOT emit mate CIGAR (MC)
 // tags, even with MarkDuplicates enabled. REDUX requires MC on every paired
-// read, so we post-process the fq2bam output with:
-//   samtools sort -n  →  samtools fixmate -m  →  samtools sort
+// read, so we post-process the fq2bam output by streaming through:
+//   samtools collate  →  samtools fixmate -m  →  samtools sort
 // to explicitly compute MC (and MS) tags before handing the BAM to REDUX.
+// Collate (fast pair-grouping) avoids the cost of a full name-sort, and the
+// pipe chain avoids materialising two intermediate full-size BAMs on disk.
 // The Parabricks container bundles samtools so this stays in one container.
 
 process PARABRICKS_FQ2BAM {
@@ -57,16 +59,19 @@ process PARABRICKS_FQ2BAM {
         ${num_gpus} \\
         ${args}
 
-    # Add mate CIGAR (MC) and mate score (MS) tags. Parabricks GPU BWA does
-    # not write these; REDUX downstream requires MC. Three-stage sort/fixmate
-    # is unavoidable because samtools fixmate requires name-sorted input and
-    # REDUX expects coord-sorted output.
-    samtools sort -n -@ ${task.cpus} -O bam -T fixmate_namesort -o ${prefix}.namesorted.bam ${prefix}.pb.bam
+    # Add mate CIGAR (MC) and mate score (MS) tags. Parabricks 4.0.0 GPU BWA
+    # does not write these; REDUX downstream requires MC.
+    #
+    # samtools fixmate needs reads with mates adjacent. We use samtools collate
+    # (fast bucketing-based pair-grouping, not full name sort) instead of
+    # `sort -n`, then stream collate → fixmate → coord-sort via pipes. This
+    # avoids materialising two intermediate full-size BAMs on disk and is
+    # noticeably faster than the previous three-stage form, especially at WGS
+    # scale where each BAM is hundreds of GB.
+    samtools collate -O -u -@ ${task.cpus} ${prefix}.pb.bam \\
+        | samtools fixmate -m -u -@ ${task.cpus} - - \\
+        | samtools sort -@ ${task.cpus} -T fixmate_coordsort -o ${prefix}.bam -
     rm ${prefix}.pb.bam
-    samtools fixmate -m -@ ${task.cpus} ${prefix}.namesorted.bam ${prefix}.fixmate.bam
-    rm ${prefix}.namesorted.bam
-    samtools sort -@ ${task.cpus} -O bam -T fixmate_coordsort -o ${prefix}.bam ${prefix}.fixmate.bam
-    rm ${prefix}.fixmate.bam
     samtools index -@ ${task.cpus} ${prefix}.bam
 
     cat <<-END_VERSIONS > versions.yml
