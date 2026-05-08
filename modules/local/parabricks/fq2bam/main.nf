@@ -17,11 +17,10 @@ process PARABRICKS_FQ2BAM {
     label 'process_gpu'
     label 'gpu_24gb'
 
-    // Parabricks requires the reference FASTA to live alongside the BWA index
-    // files; stageInMode 'copy' lets us cp the fasta into the index dir without
-    // clobbering the shared work cache.
-    stageInMode 'copy'
-
+    // Default symlink staging is fine — we explicitly `cp -L` the FASTA next
+    // to the BWA index inside the script (the only file Parabricks requires
+    // as a real copy). Forcing stageInMode 'copy' here would also duplicate
+    // the input FASTQs (250+ GB on real WGS), which is wasteful.
     container "nvcr.io/nvidia/clara/clara-parabricks:4.0.0-1"
 
     input:
@@ -49,7 +48,9 @@ process PARABRICKS_FQ2BAM {
     def rg_string = "@RG\\tID:${rg_id}\\tSM:${meta.sample_id}\\tLB:${meta.library_id}\\tPL:ILLUMINA\\tPU:${rg_id}"
     """
     INDEX=\$(find -L ./ -name "*.amb" | sed 's/\\.amb\$//')
-    cp ${fasta} \$INDEX
+    # -L follows the symlink so we copy the underlying FASTA, not the link.
+    # Parabricks needs the FASTA to live in the same directory as the BWA index.
+    cp -L ${fasta} \$INDEX
 
     pbrun fq2bam \\
         --ref \$INDEX \\
