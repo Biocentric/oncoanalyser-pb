@@ -233,8 +233,16 @@ Pass with `-c local.config`.
 > }
 > ```
 >
-> The PARABRICKS_FQ2BAM process itself requests 96h via `accelerators.config`,
-> but a tighter `resourceLimits` cap will silently override it.
+> The PARABRICKS_FQ2BAM process itself requests 96h / 128 GB / 16 CPUs via
+> `accelerators.config`, but a tighter `resourceLimits` cap will silently
+> override any of those. In particular, the upstream `process_high` label
+> allocates 72 GB memory; on deep WGS that's not enough and fq2bam's
+> internal `postsort` will be OOM-killed by Docker's container cgroup with
+> a generic "Could not run fq2bam" message and no CUDA trace. The 128 GB
+> override in `accelerators.config` fixes this on a workstation with 144 GB+
+> host RAM. If you see the cgroup-OOM symptom on still-deeper input, raise
+> the `withName: 'PARABRICKS_FQ2BAM'` memory in `accelerators.config` and
+> bump the `resourceLimits.memory` cap to match.
 
 ## Usage
 
