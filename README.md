@@ -98,13 +98,17 @@ plus a hardware profile, as shown below.
 - **Alignment-only on GPU; dedup is REDUX's job.** `fq2bam` runs with `--no-markdups`. Duplicate
   marking is left to [REDUX](https://github.com/hartwigmedical/hmftools/tree/master/redux),
   whose dedup and (optional) UMI consensus logic is tuned for SAGE's somatic error model.
-- **`samtools collate → fixmate → sort` post-process to add mate CIGAR (MC) tags.** Parabricks
-  4.0.0's GPU BWA implementation does not emit MC tags — even with MarkDuplicates enabled — and
-  REDUX rejects reads without MC. The Parabricks module therefore streams the fq2bam output
+- **Separate `SAMTOOLS_FIXMATE_SORT` step to add mate CIGAR (MC) tags.** Parabricks 4.0.0's
+  GPU BWA implementation does not emit MC tags — even with MarkDuplicates enabled — and REDUX
+  rejects reads without MC. A dedicated downstream Nextflow process streams the fq2bam output
   through `samtools collate` (fast pair-grouping, not a full name-sort) into `samtools fixmate
   -m` (writes MC and MS) into a coordinate `samtools sort`. Pipe-streamed, so only one
-  intermediate full-size BAM exists on disk at a time. The Parabricks container bundles
-  samtools, so this stays in one container.
+  intermediate full-size BAM exists on disk at a time.
+- **Alignment and fixmate are two separate Nextflow tasks.** Splitting them means a bug in the
+  post-process (e.g. a samtools flag incompatible with the container's bundled version) only
+  invalidates the ~1-2h fixmate cache, not the 12-16h GPU alignment cache. The
+  `SAMTOOLS_FIXMATE_SORT` process uses a dedicated samtools 1.19 biocontainer rather than the
+  samtools 1.10 bundled in the Parabricks 4.0.0-1 image.
 - **VCFs are not handed over.** Oncoanalyser calls somatic variants with SAGE (not Mutect2 or
   DeepVariant). The integration point is therefore the BAM, not the VCF.
 - **Reference is the HMF bundle.** The same FASTA powers Parabricks alignment and all downstream

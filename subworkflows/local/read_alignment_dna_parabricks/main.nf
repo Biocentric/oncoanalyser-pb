@@ -14,8 +14,9 @@
 import Constants
 import Utils
 
-include { FASTP              } from '../../../modules/local/fastp/main'
-include { PARABRICKS_FQ2BAM  } from '../../../modules/local/parabricks/fq2bam/main'
+include { FASTP                  } from '../../../modules/local/fastp/main'
+include { PARABRICKS_FQ2BAM      } from '../../../modules/local/parabricks/fq2bam/main'
+include { SAMTOOLS_FIXMATE_SORT  } from '../../../modules/local/samtools/fixmate_sort/main'
 
 workflow READ_ALIGNMENT_DNA_PARABRICKS {
     take:
@@ -109,13 +110,22 @@ workflow READ_ALIGNMENT_DNA_PARABRICKS {
             return [meta_pb, fwd, rev]
         }
 
+    // Step 1: GPU alignment. Emits ${id}.pb.bam (no mate CIGAR tags).
     PARABRICKS_FQ2BAM(
         ch_fq2bam_inputs,
         genome_fasta.map { [[id: 'fasta'], it] },
         genome_bwa_index.map { [[id: 'bwa_index'], it] },
     )
 
-    ch_versions = ch_versions.mix(PARABRICKS_FQ2BAM.out.versions)
+    // Step 2: add mate CIGAR + mate score tags. Emits ${id}.bam (REDUX-ready).
+    // Split out as its own Nextflow process so post-process failures do not
+    // invalidate the multi-hour GPU alignment cache.
+    SAMTOOLS_FIXMATE_SORT(PARABRICKS_FQ2BAM.out.bam)
+
+    ch_versions = ch_versions.mix(
+        PARABRICKS_FQ2BAM.out.versions,
+        SAMTOOLS_FIXMATE_SORT.out.versions,
+    )
 
     // Reunite BAMs per sample — identical logic to bwa-mem2 path so downstream
     // Redux sees the same channel shape.
@@ -129,7 +139,7 @@ workflow READ_ALIGNMENT_DNA_PARABRICKS {
 
     ch_bams_united = ch_sample_fastq_counts
         .cross(
-            PARABRICKS_FQ2BAM.out.bam
+            SAMTOOLS_FIXMATE_SORT.out.bam
                 .map { meta_pb, bam, bai -> [[key: meta_pb.key, sample_type: meta_pb.sample_type], bam, bai] }
         )
         .map { count_tuple, bam_tuple ->

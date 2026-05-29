@@ -1,16 +1,12 @@
 // Local Parabricks fq2bam module pinned to 4.0.0-1.
-// GPU-accelerated BWA-MEM alignment + coordinate sort, with `--no-markdups`
-// (REDUX handles dedup downstream).
+// GPU-accelerated BWA-MEM alignment + coordinate sort only, with
+// `--no-markdups` (REDUX handles dedup downstream).
 //
-// Parabricks 4.0.0's GPU BWA implementation does NOT emit mate CIGAR (MC)
-// tags, even with MarkDuplicates enabled. REDUX requires MC on every paired
-// read, so we post-process the fq2bam output by streaming through:
-//   samtools collate  →  samtools fixmate -m  →  samtools sort
-// to explicitly compute MC (and MS) tags before handing the BAM to REDUX.
-// Collate (fast pair-grouping) avoids the cost of a full name-sort, and the
-// pipe chain avoids materialising two intermediate full-size BAMs on disk.
-// The Parabricks container bundles samtools 1.10, which constrains the flag
-// set we can use (see fixmate note in the script body).
+// IMPORTANT: this process emits *.pb.bam (Parabricks-native BAM, no mate
+// CIGAR tags). REDUX requires mate CIGAR on every paired read; the
+// SAMTOOLS_FIXMATE_SORT process downstream adds those. This split exists
+// so a post-process bug doesn't invalidate the multi-hour GPU alignment
+// cache — the alignment-only output is its own Nextflow task.
 
 process PARABRICKS_FQ2BAM {
     tag "${meta.id}"
@@ -30,8 +26,8 @@ process PARABRICKS_FQ2BAM {
     tuple val(meta3), path(bwa_index)
 
     output:
-    tuple val(meta), path("${meta.id}.bam"), path("${meta.id}.bam.bai"), emit: bam
-    path "versions.yml"                                                , emit: versions
+    tuple val(meta), path("${meta.id}.pb.bam"), path("${meta.id}.pb.bam.bai"), emit: bam
+    path "versions.yml"                                                      , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -61,40 +57,17 @@ process PARABRICKS_FQ2BAM {
         ${num_gpus} \\
         ${args}
 
-    # Add mate CIGAR (MC) and mate score (MS) tags. Parabricks 4.0.0 GPU BWA
-    # does not write these; REDUX downstream requires MC.
-    #
-    # samtools fixmate needs reads with mates adjacent. We use samtools collate
-    # (fast bucketing-based pair-grouping, not full name sort) instead of
-    # `sort -n`, then stream collate → fixmate → coord-sort via pipes. This
-    # avoids materialising two intermediate full-size BAMs on disk and is
-    # noticeably faster than the previous three-stage form, especially at WGS
-    # scale where each BAM is hundreds of GB.
-    # NOTE: the Parabricks 4.0.0-1 container ships samtools 1.10. fixmate in
-    # 1.10 does NOT support the `-u` (uncompressed BAM output) shorthand;
-    # only `-r -p -c -m --no-PG --input-fmt-option -O --output-fmt -@` are
-    # accepted. Passing `-u` aborts fixmate with "invalid option" and
-    # cascade-kills the whole pipe. We use `-O bam,level=0` on fixmate
-    # instead, which is the canonical pre-1.13 equivalent. collate's `-u`
-    # is supported in 1.10 so it stays.
-    samtools collate -O -u -@ ${task.cpus} ${prefix}.pb.bam \\
-        | samtools fixmate -m -O bam,level=0 -@ ${task.cpus} - - \\
-        | samtools sort -@ ${task.cpus} -T fixmate_coordsort -o ${prefix}.bam -
-    rm ${prefix}.pb.bam
-    samtools index -@ ${task.cpus} ${prefix}.bam
-
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         parabricks: \$(pbrun version 2>&1 | grep -m1 '^pbrun:' | sed 's/^pbrun:[[:space:]]*//' || echo "4.0.0-1")
-        samtools: \$(samtools --version | sed -n '/^samtools / { s/^.* //p }' | head -n1)
     END_VERSIONS
     """
 
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
-    touch ${prefix}.bam
-    touch ${prefix}.bam.bai
+    touch ${prefix}.pb.bam
+    touch ${prefix}.pb.bam.bai
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         parabricks: "4.0.0-1"
