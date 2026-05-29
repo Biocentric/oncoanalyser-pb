@@ -9,7 +9,8 @@
 // to explicitly compute MC (and MS) tags before handing the BAM to REDUX.
 // Collate (fast pair-grouping) avoids the cost of a full name-sort, and the
 // pipe chain avoids materialising two intermediate full-size BAMs on disk.
-// The Parabricks container bundles samtools so this stays in one container.
+// The Parabricks container bundles samtools 1.10, which constrains the flag
+// set we can use (see fixmate note in the script body).
 
 process PARABRICKS_FQ2BAM {
     tag "${meta.id}"
@@ -69,8 +70,15 @@ process PARABRICKS_FQ2BAM {
     # avoids materialising two intermediate full-size BAMs on disk and is
     # noticeably faster than the previous three-stage form, especially at WGS
     # scale where each BAM is hundreds of GB.
+    # NOTE: the Parabricks 4.0.0-1 container ships samtools 1.10. fixmate in
+    # 1.10 does NOT support the `-u` (uncompressed BAM output) shorthand;
+    # only `-r -p -c -m --no-PG --input-fmt-option -O --output-fmt -@` are
+    # accepted. Passing `-u` aborts fixmate with "invalid option" and
+    # cascade-kills the whole pipe. We use `-O bam,level=0` on fixmate
+    # instead, which is the canonical pre-1.13 equivalent. collate's `-u`
+    # is supported in 1.10 so it stays.
     samtools collate -O -u -@ ${task.cpus} ${prefix}.pb.bam \\
-        | samtools fixmate -m -u -@ ${task.cpus} - - \\
+        | samtools fixmate -m -O bam,level=0 -@ ${task.cpus} - - \\
         | samtools sort -@ ${task.cpus} -T fixmate_coordsort -o ${prefix}.bam -
     rm ${prefix}.pb.bam
     samtools index -@ ${task.cpus} ${prefix}.bam
