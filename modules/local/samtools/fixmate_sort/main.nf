@@ -35,10 +35,16 @@ process SAMTOOLS_FIXMATE_SORT {
     script:
     def args   = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
+    // IMPORTANT: pass explicit temp-file prefixes to both collate and sort.
+    // samtools 1.13+ collate defaults its temp prefix to /tmp/collate.NNN.bam
+    // when no <prefix> argument is given — inside our biocontainer /tmp is
+    // the small writable container layer and fills up at WGS scale.
+    // Explicit prefixes here resolve to the Nextflow task's cwd, which is
+    // the bind-mounted work dir on the host filesystem (plenty of space).
     """
-    samtools collate -O -u -@ ${task.cpus} ${pb_bam} \\
+    samtools collate -O -u -@ ${task.cpus} ${pb_bam} ${prefix}_collate_tmp \\
         | samtools fixmate -m -u -@ ${task.cpus} - - \\
-        | samtools sort -@ ${task.cpus} -T fixmate_coordsort -o ${prefix}.bam -
+        | samtools sort -@ ${task.cpus} -T ${prefix}_sort_tmp -o ${prefix}.bam -
     samtools index -@ ${task.cpus} ${prefix}.bam
 
     cat <<-END_VERSIONS > versions.yml
